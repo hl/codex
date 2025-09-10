@@ -59,6 +59,17 @@ Example Bloom outline (generic):
 - Prefer `rg` for searching and read files in <= 250-line chunks
 - Respect sandbox/approval settings; ask when elevated privileges or destructive actions are needed
 
+## Tool Preferences (Advisory)
+
+- Capability-first: specify the desired capability, then a preferred tool, then a fallback.
+- Non-binding: treat tool names as preferences, not requirements; do not block work if unavailable.
+- Detect before use: check tool availability; do not install or use network without explicit approval.
+- Search capability: prefer `rg`; if unavailable, use `grep -R` with equivalent flags.
+- Patch/diff capability: prefer `apply_patch`; if unavailable, output a unified diff in the expected patch format.
+- Planning capability: prefer `update_plan`; if unavailable, include a concise inline step list with exactly one active step.
+- Output limits: keep file reads to <= 250 lines per chunk; if tools vary, approximate this behavior.
+- Last reviewed: 2025-09-10.
+
 ## Commits (only when I ask)
 
 - Do not commit or push unless I explicitly request it
