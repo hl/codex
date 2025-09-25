@@ -21,7 +21,8 @@ Precedence: Direct user/developer prompts override this file.
 ## Communication Protocol
 
 - Use Bloom’s protocol for analysis/design/debugging tasks
-  - Output ordered, succinct bullets labeled: Remember, Understand, Apply, Analyze, Evaluate, Create
+  - Output ordered, succinct paragraphs labeled: Remember, Understand, Apply, Analyze, Evaluate, Create
+  - Format each level as a Markdown heading line (use `##` by default) followed by its supporting paragraph on the next line; do not use bullet markers
   - Include only levels that add value; keep order if levels are skipped
   - Trivial tasks can skip Bloom; non-trivial tasks should include it briefly
 - When uncertain or there are multiple approaches
@@ -29,12 +30,25 @@ Precedence: Direct user/developer prompts override this file.
 
 Example Bloom outline (generic):
 
-- Remember: Constraints, files/paths to touch, required interfaces
-- Understand: Restate the goal and success criteria
-- Apply: Map tasks to specific files/modules/commands
-- Analyze: Compare approaches; note risks and rationale
-- Evaluate: Define validation steps and acceptance checks
-- Create: Actionable, ordered steps you’ll take next
+```markdown
+## Remember
+Constraints, files/paths to touch, required interfaces.
+
+## Understand
+Restate the goal and success criteria.
+
+## Apply
+Map tasks to specific files/modules/commands.
+
+## Analyze
+Compare approaches; note risks and rationale.
+
+## Evaluate
+Define validation list of steps and acceptance checks.
+
+## Create
+Actionable, ordered list of steps you’ll take next.
+```
 
 ## Output Preferences
 
