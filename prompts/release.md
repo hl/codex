@@ -16,8 +16,8 @@ Validation
 - Build the Hex package locally with `mix hex.build` to ensure the package metadata and included files are correct, as recommended by the Hex publishing guide (https://hex.pm/docs/publish, https://hexdocs.pm/hex/Mix.Tasks.Hex.Build.html).
 
 Version Control
-- Stage the release updates and commit them with a message like `Release vX.Y.Z`.
-- Create an annotated tag for the same version (`git tag -a vX.Y.Z -m "Release vX.Y.Z"`).
+- Stage the release updates and create a signed commit with a message like `Release vX.Y.Z` (for example, `git commit -S -m "Release vX.Y.Z"`).
+- Create a signed annotated tag for the same version (`git tag -s vX.Y.Z -m "Release vX.Y.Z"`).
 - Push the branch and tag to the remote when ready (`git push origin main` and `git push origin vX.Y.Z`).
 
 GitHub Release
