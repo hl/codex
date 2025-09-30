@@ -21,8 +21,9 @@ Version Control
 - Push the branch and tag to the remote when ready (`git push origin main` and `git push origin vX.Y.Z`).
 
 GitHub Release
-- Draft a GitHub release for tag `vX.Y.Z`. Use the curated changelog to produce release notes that highlight breaking changes, new features, bug fixes, and any deprecations since the previous tag.
-- Attach verification details (test commands run, `mix hex.build` output) so downstream users understand the release quality.
+- Use the GitHub CLI (`gh release create`) to publish the release for tag `vX.Y.Z`, wiring in the curated changelog so the notes highlight breaking changes, new features, bug fixes, and deprecations since the previous tag.
+- Ensure the release description is complete: include verification details (test commands run, `mix hex.build` output), installation/upgrade guidance if needed, and any follow-up actions or acknowledgements that help downstream users.
+- Link every commit included in the release so readers can navigate directly to the diff for each change.
 
 Publish to Hex.pm
 - Ensure `HEX_API_KEY` is configured in the environment.
