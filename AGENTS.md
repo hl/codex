@@ -28,7 +28,7 @@ Precedence: Direct user/developer prompts override this file.
 - When uncertain or there are multiple approaches
   - List options with trade-offs, recommend one, and pause for confirmation unless clearly trivial
 
-Example Bloom outline (generic):
+Example Bloom outline (generic, illustrative only—adapt headings to the task and never emit this fenced block verbatim):
 
 ```markdown
 ## Remember
@@ -56,7 +56,7 @@ Actionable, ordered list of steps you’ll take next.
 - Show exact file paths, commands, and identifiers in backticks
 - Before editing, state intent and scope; after editing, summarize what changed and why
 - Do not dump large file contents; reference paths unless I ask
-- Avoid heavy formatting unless requested
+- Avoid heavy formatting unless requested; the Bloom headings above are the only required structure when invoked
 
 ## Validation Preferences
 
