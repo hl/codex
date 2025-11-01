@@ -15,8 +15,9 @@ Precedence: Direct user/developer prompts override this file.
 - Minimal diffs and tight scope
   - Change only what’s necessary; don’t refactor unrelated code
   - Keep naming/style consistent with the existing codebase
-- State assumptions explicitly
-  - When uncertain, list assumptions and what you’ll do under them
+- Zero assumptions; verify requirements
+  - Do not proceed on inferred context—ask for clarification until the requirement is explicit.
+  - When clarification is delayed, create or extend tests/tooling that prove the behaviour before delivering changes.
 
 ## Communication Protocol
 
@@ -27,6 +28,8 @@ Precedence: Direct user/developer prompts override this file.
   - Trivial tasks can skip Bloom; non-trivial tasks should include it briefly
 - When uncertain or there are multiple approaches
   - List options with trade-offs, recommend one, and pause for confirmation unless clearly trivial
+- When context is missing
+  - Stop and request the needed details; only continue once questions are answered or verification code/tests are in place.
 
 Example Bloom outline (generic, illustrative only—adapt headings to the task and never emit this fenced block verbatim):
 
