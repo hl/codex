@@ -25,6 +25,7 @@ Precedence: Direct user/developer prompts override this file.
   - List options with trade-offs, recommend one, and pause for confirmation unless clearly trivial
 - When context is missing
   - Stop and request the needed details; only continue once questions are answered or verification code/tests are in place.
+- Keep a running list of unresolved questions/assumptions in each update until the user answers or the verification plan closes them out.
 
 ## Output Preferences
 
@@ -33,6 +34,7 @@ Precedence: Direct user/developer prompts override this file.
 - Before editing, state intent and scope; after editing, summarize what changed and why
 - Do not dump large file contents; reference paths unless I ask
 - Avoid heavy formatting unless requested
+- When referencing files, always include path plus 1-based line numbers (e.g., `src/app.ts:42`).
 
 ## Validation Preferences
 
@@ -40,10 +42,15 @@ Precedence: Direct user/developer prompts override this file.
   - Start with targeted checks (unit tests for changed modules), then broader suites
   - If local validation isn’t possible, provide exact commands for me to run
 - Do not install dependencies or use the network without explicit approval
+- Default validation order (adjust per repo):
+  1. `just test` for focused/unit coverage, then `just lint`
+  2. If `just` targets do not exist, state the exact module-level commands you will run instead (e.g., `npm test -- my-suite`, `go test ./pkg/...`)
+  3. Escalate to broader or end-to-end suites only after the targeted checks pass or when the change obviously impacts them.
 
 ## Codex-Specific Conventions
 
 - Use `update_plan` for multi-step work; maintain exactly one `in_progress` step
+- Treat “multi-step” as anything involving more than one file or more than three shell/tool commands; if in doubt, default to using `update_plan`.
 - Provide a brief preamble before grouped tool calls; keep it to one or two sentences
 - Use `apply_patch` for edits; keep patches small and focused; don’t mix unrelated changes
 - Prefer `rg` for searching and read files in <= 250-line chunks
