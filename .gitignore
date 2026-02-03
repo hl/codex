@@ -1,8 +1,4 @@
-config.toml
-history.jsonl
-log
-sessions
-version.json
-archived_sessions/
-auth.json
-internal_storage.json
+*
+.*
+!.gitignore
+!AGENTS.md
