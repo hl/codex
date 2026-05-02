@@ -1,0 +1,7 @@
+interface:
+  display_name: "Flywheel"
+  short_description: "Spec, review, and compound agent work"
+  default_prompt: "Use $flywheel to draft a spec, validate it, review the implementation against it, and compound reusable learnings."
+
+policy:
+  allow_implicit_invocation: true

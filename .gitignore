@@ -1,4 +1,14 @@
 *
 .*
+
 !.gitignore
 !AGENTS.md
+
+!prompts/
+!prompts/**
+prompts/.DS_Store
+
+!skills/
+!skills/**
+skills/.system/
+skills/**/.DS_Store
