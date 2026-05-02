@@ -27,6 +27,11 @@ impact.
   compounding specs.
 - Discovery cadence: read `references/brainstorm.md` when the brief is fuzzy.
 - Solution docs: read `references/solution-docs.md` before compounding or refreshing.
+- Review evidence hash: use `scripts/review-evidence-hash.sh` from review and compound.
+  Resolve it with:
+  ```bash
+  FLYWHEEL_SKILL_ROOT="${FLYWHEEL_SKILL_ROOT:-${CODEX_HOME:-$HOME/.codex}/skills/flywheel}"
+  ```
 
 ## Draft
 
@@ -34,9 +39,11 @@ When drafting:
 
 1. Decide if a spec is warranted. If the task is trivial, say no spec is needed and why.
 2. If the brief is fuzzy, ask one discovery question at a time using `references/brainstorm.md`.
-3. Search existing solution docs before writing:
+3. Search existing solution docs before writing. Pick 3-6 lowercase keywords from the brief
+   that name the problem domain, component or surface area, and technique or behavior. Skip
+   structural words like "add", "create", "feature", and "support"; OR-join the keywords:
    ```bash
-   test -d docs/solutions && rg -n "<domain|component|problem keywords>" docs/solutions
+   test -d docs/solutions && rg -n -i 'csv|export|invoice|admin|authorization|streaming' docs/solutions
    ```
 4. Read strong matches and incorporate relevant prior decisions, pitfalls, and patterns.
 5. Write `docs/specs/<kebab-case-feature>.md` with `status: draft`.
@@ -50,8 +57,10 @@ Status handling:
 
 - `draft`: normal validation; if clean, set `status: ready`.
 - `ready`: revalidate and leave status unchanged.
-- `in-progress`: validate only if explicitly requested; do not change status.
-- `done`: do not validate as pre-implementation work; suggest a follow-up spec or refresh.
+- `in-progress`: run validation as a sanity check, but do not change status. State that the
+  spec is already in progress and findings may affect work already in flight.
+- `done`: stop; tell the user the spec is finalized and a follow-up spec is needed for new
+  behavior.
 
 Return findings instead of rewriting content. Each finding should name the section, explain
 the gap, and give a concrete fix. Block unresolved open questions unless the user explicitly
@@ -70,6 +79,7 @@ ambiguous.
 Collect all evidence, including dirty worktree state:
 
 ```bash
+FLYWHEEL_SKILL_ROOT="${FLYWHEEL_SKILL_ROOT:-${CODEX_HOME:-$HOME/.codex}/skills/flywheel}"
 BASE=$(git merge-base origin/HEAD HEAD 2>/dev/null \
   || git merge-base origin/main HEAD 2>/dev/null \
   || git merge-base origin/master HEAD 2>/dev/null \
@@ -87,19 +97,20 @@ git diff --name-only
 git ls-files --others --exclude-standard
 ```
 
-Compute the review evidence hash with full untracked file contents:
+Compute the review evidence hash with full untracked file metadata/content. Use the shipped
+script so review and compound hash byte-identical evidence:
 
 ```bash
-{
-  git diff "$BASE"...HEAD
-  git diff --cached
-  git diff
-  git ls-files --others --exclude-standard | while IFS= read -r f; do
-    printf '\n--- untracked: %s ---\n' "$f"
-    test -f "$f" && cat "$f"
-  done
-} | shasum -a 256
+DIFF_HASH=$(bash "$FLYWHEEL_SKILL_ROOT/scripts/review-evidence-hash.sh" "$BASE")
 ```
+
+Do not inline an alternative hash pipeline. Compound recomputes via the same script, and
+separator strings, untracked file ordering, or trailing newline differences will change the
+digest.
+
+If the spec status is `ready`, update it to `in-progress` before reporting review results.
+Leave `in-progress` unchanged. If it is `draft`, warn that it has not been validated. If it
+is `done`, ask whether the user meant to review already completed work before continuing.
 
 Evaluate every acceptance criterion as `Satisfied`, `Partial`, or `Unsatisfied`. Also check
 unexpected behavior and out-of-scope creep.
@@ -117,7 +128,7 @@ last_review_diff_hash: <sha256>
 
 Use `last_review_status: findings` unless every criterion is satisfied and no unexpected
 behavior or scope creep exists. Compute the hash from committed, staged, unstaged, and
-full readable untracked file evidence.
+full readable untracked file metadata/content evidence.
 
 ## Compound
 
@@ -125,10 +136,21 @@ Compound only when the work is complete and worth future reuse.
 
 Before writing docs:
 
-1. Require `last_review_status: clean`, or run a local final acceptance gate.
-2. Recompute the review evidence hash. If it differs from `last_review_diff_hash`, run the
-   final acceptance gate against current evidence.
-3. Stop if any criterion is partial/unsatisfied, or if unexpected behavior/scope creep exists.
+1. Require `last_review_status: clean`. If it is missing, `findings`, or absent entirely,
+   stop and tell the user to run review first.
+2. Cheap path: if `last_review_worktree: clean`, the current worktree is clean, and
+   `git rev-parse HEAD` equals `last_review_head`, evidence is current and the hash
+   recompute can be skipped.
+3. Otherwise, recompute the evidence hash using the recorded `last_review_base`, not a fresh
+   merge base:
+   ```bash
+   FLYWHEEL_SKILL_ROOT="${FLYWHEEL_SKILL_ROOT:-${CODEX_HOME:-$HOME/.codex}/skills/flywheel}"
+   bash "$FLYWHEEL_SKILL_ROOT/scripts/review-evidence-hash.sh" "<last_review_base>"
+   ```
+   Continue only if it equals `last_review_diff_hash`.
+4. If neither path confirms the evidence is current, stop. Tell the user the implementation
+   changed since the last clean review and ask them to re-run review. Do not re-evaluate
+   acceptance criteria inside compound; review owns that evaluation.
 
 Capture:
 
@@ -137,8 +159,10 @@ Capture:
 - Overlap: existing `docs/solutions/` docs with high/moderate/low overlap.
 
 Use subagents only when the user explicitly permits parallel agent work; otherwise do this
-locally. Write or update a solution doc using `references/solution-docs.md`. Then verify the
-doc will be found by plausible future searches and set the spec `status: done`.
+locally. Use `last_review_base` as the diff base for capture so the journey/build/overlap
+analysis matches the reviewed evidence. Write or update a solution doc using
+`references/solution-docs.md`. Then verify the doc will be found by plausible future
+searches and set the spec `status: done`.
 
 ## Refresh
 
