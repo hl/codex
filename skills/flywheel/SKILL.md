@@ -21,6 +21,39 @@ Use this for work where assumptions, acceptance criteria, or future reuse matter
 trivial edits, obvious bug fixes, pure formatting, or one-file changes with no behavior
 impact.
 
+## Goal
+
+Turn non-trivial Codex work into a traceable loop: clear intent before implementation,
+evidence-based acceptance review after implementation, and durable solution knowledge when
+the work is complete.
+
+Success means:
+
+- The spec captures the outcome, acceptance criteria, constraints, open questions, and
+  validation plan before implementation starts.
+- Review decisions are grounded in committed, staged, unstaged, and untracked evidence.
+- Compound only runs from current clean-review evidence and records reusable decisions,
+  patterns, and follow-ups.
+- User-facing reports state the result, blockers, changed files or docs, and the next
+  concrete action.
+
+## Output
+
+Keep responses concise and task-shaped:
+
+- Draft: spec path, status, important assumptions, and prior solution docs used.
+- Validate: findings first, each with section, gap, and concrete fix; say when clean.
+- Review: acceptance criteria status, unexpected behavior or scope creep, metadata updates,
+  and validation evidence.
+- Compound: solution doc path, overlap with prior docs, spec status change, and any follow-up.
+- Refresh: docs checked, stale or confirmed patterns, proposed updates, and applied changes.
+
+## Stop Rules
+
+Ask only when the missing information would materially change the spec, review target, or
+solution doc scope. Stop instead of guessing when the spec is ambiguous, review evidence is
+stale, required files are missing, or a compound request lacks a current clean review.
+
 ## Files
 
 - Spec format: read `references/spec-template.md` before drafting, validating, reviewing, or
@@ -115,6 +148,10 @@ is `done`, ask whether the user meant to review already completed work before co
 Evaluate every acceptance criterion as `Satisfied`, `Partial`, or `Unsatisfied`. Also check
 unexpected behavior and out-of-scope creep.
 
+Report findings before summary. For each criterion, cite the evidence that supports the
+status. If evidence is missing or ambiguous, mark the criterion `Partial` or `Unsatisfied`
+instead of inferring intent.
+
 After the report, update only review metadata in spec frontmatter:
 
 ```yaml
@@ -157,6 +194,10 @@ Capture:
 - Journey: spec final state, spec evolution, review-driven corrections, follow-ups.
 - Build: changed files, reusable patterns, non-obvious decisions, rejected alternatives.
 - Overlap: existing `docs/solutions/` docs with high/moderate/low overlap.
+
+Write solution docs for future retrieval, not for narrating the whole session. Prefer
+concrete file paths, reusable commands, decision rules, pitfalls, and validation checks over
+general commentary.
 
 Use subagents only when the user explicitly permits parallel agent work; otherwise do this
 locally. Use `last_review_base` as the diff base for capture so the journey/build/overlap
