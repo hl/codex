@@ -1,0 +1,14 @@
+{
+  "name": "pi-flywheel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pi extension/package wrapper for the Flywheel spec, review, and learning loop.",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions/flywheel/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
