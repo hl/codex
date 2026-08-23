@@ -1,0 +1,193 @@
+#!/bin/sh
+set -u
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+codex_home=$(CDPATH='' cd -- "$script_dir/../.." && pwd)
+failures=0
+warnings=0
+
+pass() { printf 'PASS  %s\n' "$1"; }
+warn() { printf 'WARN  %s\n' "$1"; warnings=$((warnings + 1)); }
+fail() { printf 'FAIL  %s\n' "$1"; failures=$((failures + 1)); }
+
+for command_name in codex herdr bd jq zsh; do
+  if command -v "$command_name" >/dev/null 2>&1; then
+    pass "$command_name is available"
+  else
+    fail "$command_name is missing"
+  fi
+done
+
+required_files='pien.config.toml odessa.config.toml jules.config.toml rasma.config.toml mira.config.toml agents/roni.toml fleet/CHECKPOINTS.md fleet/roles/pien.md fleet/roles/odessa.md fleet/roles/jules.md fleet/roles/rasma.md fleet/roles/mira.md fleet/bin/pien fleet/bin/watch-agent fleet/bin/install-host fleet/pien.zsh'
+for relative_path in $required_files; do
+  if [ -f "$codex_home/$relative_path" ]; then
+    pass "$relative_path exists"
+  else
+    fail "$relative_path is missing"
+  fi
+done
+
+for script_path in "$codex_home/fleet/bin/pien" "$codex_home/fleet/bin/watch-agent" "$codex_home/fleet/bin/install-host" "$codex_home/fleet/bin/doctor"; do
+  if sh -n "$script_path"; then
+    pass "${script_path##*/} parses as POSIX shell"
+  else
+    fail "${script_path##*/} has a shell syntax error"
+  fi
+done
+
+if zsh -n "$codex_home/fleet/pien.zsh"; then
+  pass "pien.zsh parses as zsh"
+else
+  fail "pien.zsh has a syntax error"
+fi
+
+if command -v shellcheck >/dev/null 2>&1; then
+  if shellcheck "$codex_home/fleet/bin/pien" "$codex_home/fleet/bin/watch-agent" "$codex_home/fleet/bin/install-host"; then
+    pass "fleet shell scripts pass shellcheck"
+  else
+    fail "fleet shell scripts fail shellcheck"
+  fi
+else
+  warn "shellcheck is unavailable"
+fi
+
+for profile in pien odessa jules rasma mira; do
+  strict_output=$(mktemp)
+  if CODEX_HOME=$codex_home codex --strict-config --profile "$profile" queue \
+    --thread 00000000-0000-0000-0000-000000000000 --message fleet-config-validation \
+    >"$strict_output" 2>&1 \
+    || grep -Fq 'no rollout found for thread id 00000000-0000-0000-0000-000000000000' "$strict_output"; then
+    pass "$profile profile passes strict Codex parsing"
+  else
+    fail "$profile profile fails strict Codex parsing"
+  fi
+  rm -f "$strict_output"
+
+  prompt_output=$(mktemp)
+  if CODEX_HOME=$codex_home codex --profile "$profile" debug prompt-input validation >"$prompt_output" 2>&1; then
+    pass "$profile profile loads in Codex"
+  else
+    fail "$profile profile fails Codex validation"
+  fi
+  case "$profile" in
+    pien|odessa|jules) expected_sandbox=danger-full-access ;;
+    rasma|mira) expected_sandbox=workspace-write ;;
+  esac
+  if grep -Fq "sandbox_mode\` is \`$expected_sandbox" "$prompt_output"; then
+    pass "$profile effective sandbox is $expected_sandbox"
+  else
+    fail "$profile effective sandbox is not $expected_sandbox"
+  fi
+  rm -f "$prompt_output"
+done
+
+check_profile_runtime() {
+  profile_name=$1
+  expected_model=$2
+  expected_effort=$3
+  expected_sandbox=$4
+  profile_file=$codex_home/$profile_name.config.toml
+  if grep -Fqx "model = \"$expected_model\"" "$profile_file" \
+    && grep -Fqx "model_reasoning_effort = \"$expected_effort\"" "$profile_file" \
+    && grep -Fqx "sandbox_mode = \"$expected_sandbox\"" "$profile_file"; then
+    pass "$profile_name runtime matches the fleet matrix"
+  else
+    fail "$profile_name runtime differs from the fleet matrix"
+  fi
+}
+
+check_profile_runtime pien gpt-5.6 high danger-full-access
+check_profile_runtime odessa gpt-5.6 high danger-full-access
+check_profile_runtime jules gpt-5.6 high danger-full-access
+check_profile_runtime rasma gpt-5.6 high workspace-write
+check_profile_runtime mira gpt-5.6-luna low workspace-write
+
+roni_config=$codex_home/agents/roni.toml
+if grep -Fqx 'name = "roni"' "$roni_config" \
+  && grep -Fqx 'model = "gpt-5.6-terra"' "$roni_config" \
+  && grep -Fqx 'model_reasoning_effort = "medium"' "$roni_config" \
+  && grep -Fqx 'sandbox_mode = "read-only"' "$roni_config"; then
+  pass "Roni uses the official custom-agent shape and intended runtime"
+else
+  fail "Roni custom-agent configuration is incomplete"
+fi
+
+agent_config_count=$(find "$codex_home/agents" -type f -name '*.toml' | wc -l | tr -d '[:space:]')
+if [ "$agent_config_count" = "1" ]; then
+  pass "Roni is the sole discoverable personal custom agent"
+else
+  fail "expected only Roni, found $agent_config_count personal custom agents"
+fi
+
+checkpoint_file=$codex_home/fleet/CHECKPOINTS.md
+checkpoint_ok=true
+for checkpoint_field in checkpoint_id bead stage status actor workspace worktree branch base_sha head_sha pr review_round completed verification next_action blocker updated_at; do
+  grep -Eq "^${checkpoint_field}:" "$checkpoint_file" || checkpoint_ok=false
+done
+if [ "$checkpoint_ok" = true ]; then
+  pass "canonical Bead checkpoint contains every recovery field"
+else
+  fail "canonical Bead checkpoint is missing recovery fields"
+fi
+
+if grep -R -F -- '--dangerously-bypass-approvals-and-sandbox' \
+  "$codex_home/fleet/README.md" "$codex_home/fleet/roles" "$codex_home/fleet/bin/pien" \
+  "$codex_home"/*.config.toml >/dev/null 2>&1; then
+  fail "a fleet launch still bypasses approvals and sandboxing"
+else
+  pass "durable fleet launches preserve profile sandboxes"
+fi
+
+if grep -R -E '/Users/[^/]+|/home/[^/]+|/root(/|$)' \
+  "$codex_home/fleet/README.md" "$codex_home/fleet/CHECKPOINTS.md" "$codex_home/fleet/roles" \
+  "$codex_home/fleet/bin/pien" "$codex_home/fleet/bin/watch-agent" "$codex_home/fleet/bin/install-host" \
+  "$codex_home/fleet/pien.zsh" "$codex_home"/*.config.toml "$roni_config" >/dev/null 2>&1; then
+  fail "fleet configuration contains a hardcoded home path"
+else
+  pass "fleet configuration has no hardcoded home path"
+fi
+
+if [ -f "${AGENTS_HOME:-$HOME/.agents}/skills/herdr/SKILL.md" ]; then
+  pass "externally managed Herdr skill is present"
+else
+  fail "externally managed Herdr skill is missing"
+fi
+
+if [ -f "$codex_home/herdr-agent-state.sh" ] \
+  && [ -f "$codex_home/hooks.json" ] \
+  && jq -e '.. | strings | select(contains("herdr-agent-state.sh"))' "$codex_home/hooks.json" >/dev/null; then
+  pass "Herdr Codex integration hook is present and wired"
+else
+  fail "Herdr Codex integration hook is missing or disconnected"
+fi
+
+if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+  doctor_herdr_config=$XDG_CONFIG_HOME/herdr/config.toml
+else
+  doctor_herdr_config=$HOME/.config/herdr/config.toml
+fi
+doctor_herdr_config=${PIEN_HERDR_CONFIG:-${HERDR_CONFIG_PATH:-$doctor_herdr_config}}
+if [ -f "$doctor_herdr_config" ] && HERDR_CONFIG_PATH="$doctor_herdr_config" herdr config check >/dev/null 2>&1; then
+  pass "Herdr configuration parses"
+else
+  fail "Herdr configuration is missing or invalid"
+fi
+
+if "$codex_home/fleet/bin/install-host" --check >/dev/null 2>&1; then
+  pass "shell binding and Herdr restore policy are active"
+else
+  fail "host activation is incomplete; run fleet/bin/install-host"
+fi
+
+if [ "${HERDR_ENV:-}" = "1" ]; then
+  if herdr agent list >/dev/null 2>&1; then
+    pass "Herdr agent API is reachable from this pane"
+  else
+    fail "Herdr agent API is not reachable from this pane"
+  fi
+else
+  warn "live Herdr check skipped outside a Herdr pane"
+fi
+
+printf '\n%d failure(s), %d warning(s)\n' "$failures" "$warnings"
+[ "$failures" -eq 0 ]

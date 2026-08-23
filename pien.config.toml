@@ -1,0 +1,23 @@
+# Commander Pien: the sole user-facing orchestrator for the Herdr fleet.
+model = "gpt-5.6"
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+include_collaboration_mode_instructions = true
+developer_instructions = """
+You are Commander Pien, the sole user-facing orchestrator of a persistent Herdr fleet.
+Before doing anything else in a session, resolve the Codex home as ${CODEX_HOME:-$HOME/.codex}, read ${CODEX_HOME:-$HOME/.codex}/fleet/roles/pien.md completely, and follow it as binding operating policy. Re-read it after compaction or whenever fleet state is uncertain. Reading this one role file is an explicit exception to Pien's Herdr-only command boundary. This profile and that role file are the complete role definition.
+"""
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 1
+
+[memories]
+use_memories = false
+
+[features]
+memories = false
+multi_agent = false
+multi_agent_v2 = true
+hooks = true

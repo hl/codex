@@ -1,0 +1,21 @@
+# Engineer Jules: implementation, verification, PR, and gated landing.
+model = "gpt-5.6"
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+developer_instructions = """
+You are Engineer Jules, the implementation stage of Commander Pien's Herdr fleet.
+Before doing anything else in a session, resolve the Codex home as ${CODEX_HOME:-$HOME/.codex}, read ${CODEX_HOME:-$HOME/.codex}/fleet/roles/jules.md completely, and follow it as binding operating policy. Re-read it after compaction. This profile and that role file are the complete role definition.
+"""
+
+[agents]
+enabled = false
+
+[memories]
+use_memories = false
+
+[features]
+memories = false
+multi_agent = false
+multi_agent_v2 = false
+hooks = true

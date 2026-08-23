@@ -1,0 +1,188 @@
+#!/bin/sh
+set -eu
+
+if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+  herdr_config_default=$XDG_CONFIG_HOME/herdr/config.toml
+else
+  herdr_config_default=$HOME/.config/herdr/config.toml
+fi
+
+zshrc_file=${PIEN_ZSHRC:-$HOME/.zshrc}
+herdr_config=${PIEN_HERDR_CONFIG:-${HERDR_CONFIG_PATH:-$herdr_config_default}}
+# shellcheck disable=SC2016 # The shell startup file must expand these variables later.
+source_line='source "${CODEX_HOME:-$HOME/.codex}/fleet/pien.zsh"'
+session_key='resume_agents_on_restore = false'
+
+check_only=false
+if [ "${1:-}" = "--check" ]; then
+  [ "$#" -eq 1 ] || exit 2
+  check_only=true
+elif [ "$#" -ne 0 ]; then
+  printf '%s\n' "usage: install-host [--check]" >&2
+  exit 2
+fi
+
+zsh_ok=false
+if [ -f "$zshrc_file" ] && grep -Fqx "$source_line" "$zshrc_file" && ! grep -Eq '^[[:space:]]*alias[[:space:]]+pien=' "$zshrc_file"; then
+  zsh_ok=true
+fi
+
+herdr_ok=false
+if [ -f "$herdr_config" ] && awk '
+  /^\[session\][[:space:]]*(#.*)?$/ { in_session = 1; next }
+  /^\[[^]]+\][[:space:]]*(#.*)?$/ { in_session = 0 }
+  in_session && /^[[:space:]]*resume_agents_on_restore[[:space:]]*=[[:space:]]*false([[:space:]]*(#.*)?)?$/ { found = 1 }
+  END { exit(found ? 0 : 1) }
+' "$herdr_config"; then
+  herdr_ok=true
+fi
+
+if [ "$check_only" = true ]; then
+  [ "$zsh_ok" = true ] || printf '%s\n' "MISSING: $source_line in $zshrc_file" >&2
+  [ "$herdr_ok" = true ] || printf '%s\n' "MISSING: [session] $session_key in $herdr_config" >&2
+  [ "$zsh_ok" = true ] && [ "$herdr_ok" = true ]
+  exit
+fi
+
+if [ "$zsh_ok" = true ] && [ "$herdr_ok" = true ]; then
+  printf '%s\n' "Pien shell binding and Herdr restore policy installed."
+  exit 0
+fi
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+
+command -v herdr >/dev/null 2>&1 || {
+  printf '%s\n' "install-host requires herdr" >&2
+  exit 1
+}
+
+install_lock=${TMPDIR:-/tmp}/pien-host-install-$(id -u).lock
+release_install_lock() {
+  rm -f "$install_lock/owner"
+  rmdir "$install_lock" 2>/dev/null || true
+}
+if ! mkdir "$install_lock" 2>/dev/null; then
+  lock_pid=
+  lock_start=
+  if [ -f "$install_lock/owner" ]; then
+    lock_pid=$(sed -n '1p' "$install_lock/owner")
+    lock_start=$(sed -n '2p' "$install_lock/owner")
+  fi
+  current_start=
+  case "$lock_pid" in
+    ''|*[!0-9]*) ;;
+    *) current_start=$(ps -ww -p "$lock_pid" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') ;;
+  esac
+  if [ -z "$lock_pid" ] || [ -z "$lock_start" ]; then
+    lock_mtime=$(stat -f '%m' "$install_lock" 2>/dev/null || stat -c '%Y' "$install_lock" 2>/dev/null || printf '0')
+    lock_age=$(($(date +%s) - lock_mtime))
+    if [ "$lock_age" -lt 10 ]; then
+      printf '%s\n' "another Pien host installation is starting" >&2
+      exit 1
+    fi
+  elif [ -n "$current_start" ] && [ "$current_start" = "$lock_start" ]; then
+    printf '%s\n' "another Pien host installation is running" >&2
+    exit 1
+  fi
+  rm -f "$install_lock/owner"
+  rmdir "$install_lock" 2>/dev/null || {
+    printf '%s\n' "cannot recover stale host-install lock: $install_lock" >&2
+    exit 1
+  }
+  mkdir "$install_lock"
+fi
+printf '%s\n%s\n' "$$" "$(ps -ww -p "$$" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" >"$install_lock/owner"
+chmod 600 "$install_lock/owner"
+trap 'release_install_lock' EXIT HUP INT TERM
+
+if [ "$zsh_ok" != true ] && [ -L "$zshrc_file" ]; then
+  printf '%s\n' "refusing to replace zshrc symlink; update its resolved target explicitly" >&2
+  exit 1
+fi
+if [ "$herdr_ok" != true ] && [ -L "$herdr_config" ]; then
+  printf '%s\n' "refusing to replace Herdr config symlink; update its resolved target explicitly" >&2
+  exit 1
+fi
+
+if [ "$zsh_ok" != true ]; then
+  zsh_dir=${zshrc_file%/*}
+  [ "$zsh_dir" != "$zshrc_file" ] || zsh_dir=.
+  mkdir -p "$zsh_dir"
+  [ -f "$zshrc_file" ] || : >"$zshrc_file"
+  zsh_tmp=$(mktemp "$zshrc_file.pien-tmp.XXXXXX")
+  cp -p "$zshrc_file" "$zsh_tmp"
+  awk -v source_line="$source_line" '
+    /^[[:space:]]*alias[[:space:]]+pien=/ { next }
+    $0 == source_line { if (!seen) print; seen = 1; next }
+    { print }
+    END {
+      if (!seen) {
+        if (NR > 0) print ""
+        print source_line
+      }
+    }
+  ' "$zshrc_file" >"$zsh_tmp"
+  if ! cmp -s "$zshrc_file" "$zsh_tmp"; then
+    zsh_backup=$(mktemp "$zshrc_file.pien-backup.$timestamp.XXXXXX")
+    cp -p "$zshrc_file" "$zsh_backup"
+    mv "$zsh_tmp" "$zshrc_file"
+  else
+    rm -f "$zsh_tmp"
+  fi
+fi
+
+if [ "$herdr_ok" != true ]; then
+  herdr_dir=${herdr_config%/*}
+  [ "$herdr_dir" != "$herdr_config" ] || herdr_dir=.
+  mkdir -p "$herdr_dir"
+  [ -f "$herdr_config" ] || : >"$herdr_config"
+  herdr_tmp=$(mktemp "$herdr_config.pien-tmp.XXXXXX")
+  cp -p "$herdr_config" "$herdr_tmp"
+  awk -v session_key="$session_key" '
+    function emit_key() {
+      if (in_session && !key_written) {
+        print session_key
+        key_written = 1
+      }
+    }
+    /^\[[^]]+\][[:space:]]*(#.*)?$/ {
+      emit_key()
+      in_session = ($0 ~ /^\[session\][[:space:]]*(#.*)?$/)
+      if (in_session) {
+        session_seen = 1
+        key_written = 0
+      }
+      print
+      next
+    }
+    in_session && /^[[:space:]]*resume_agents_on_restore[[:space:]]*=/ {
+      if (!key_written) print session_key
+      key_written = 1
+      next
+    }
+    { print }
+    END {
+      emit_key()
+      if (!session_seen) {
+        if (NR > 0) print ""
+        print "[session]"
+        print session_key
+      }
+    }
+  ' "$herdr_config" >"$herdr_tmp"
+  if ! HERDR_CONFIG_PATH="$herdr_tmp" herdr config check >/dev/null; then
+    rm -f "$herdr_tmp"
+    printf '%s\n' "refusing to install an invalid Herdr configuration" >&2
+    exit 1
+  fi
+  if ! cmp -s "$herdr_config" "$herdr_tmp"; then
+    herdr_backup=$(mktemp "$herdr_config.pien-backup.$timestamp.XXXXXX")
+    cp -p "$herdr_config" "$herdr_backup"
+    mv "$herdr_tmp" "$herdr_config"
+  else
+    rm -f "$herdr_tmp"
+  fi
+fi
+
+"$0" --check
+printf '%s\n' "Pien shell binding and Herdr restore policy installed."

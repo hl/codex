@@ -1,0 +1,491 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  printf '%s\n' "usage: watch-agent --detach <agent> <prompt> | --rearm <agent> | --adopt <agent> | --adopt-all | --list | --clear <agent>" >&2
+  exit 2
+}
+
+state_root() {
+  if [ -n "${PIEN_STATE_DIR:-}" ]; then
+    printf '%s\n' "$PIEN_STATE_DIR"
+  elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    printf '%s\n' "$XDG_STATE_HOME/pien"
+  else
+    printf '%s\n' "$HOME/.local/state/pien"
+  fi
+}
+
+require_context() {
+  [ "${HERDR_ENV:-}" = "1" ] || {
+    printf '%s\n' "watch-agent requires HERDR_ENV=1" >&2
+    exit 1
+  }
+  [ -n "${CODEX_THREAD_ID:-}" ] || {
+    printf '%s\n' "watch-agent requires CODEX_THREAD_ID" >&2
+    exit 1
+  }
+}
+
+require_commands() {
+  for command_name in jq herdr codex; do
+    command -v "$command_name" >/dev/null 2>&1 || {
+      printf '%s\n' "watch-agent requires $command_name" >&2
+      exit 1
+    }
+  done
+}
+
+validate_agent() {
+  agent_name=$1
+  case "$agent_name" in
+    ''|[!a-z]*|*[!a-z0-9_-]*)
+      printf '%s\n' "invalid agent name: $agent_name" >&2
+      exit 2
+      ;;
+  esac
+  [ "${#agent_name}" -le 32 ] || {
+    printf '%s\n' "agent name exceeds 32 characters: $agent_name" >&2
+    exit 2
+  }
+}
+
+prepare_state() {
+  PIEN_WATCH_ROOT=$(state_root)
+  PIEN_WATCH_RECORDS=$PIEN_WATCH_ROOT/watches
+  PIEN_WATCH_TARGETS=$PIEN_WATCH_ROOT/targets
+  PIEN_WATCH_LOGS=$PIEN_WATCH_ROOT/logs
+  PIEN_WATCH_PROMPTS=$PIEN_WATCH_ROOT/prompts
+  PIEN_WATCH_LEASES=$PIEN_WATCH_ROOT/leases
+  mkdir -p "$PIEN_WATCH_RECORDS" "$PIEN_WATCH_TARGETS" "$PIEN_WATCH_LOGS" "$PIEN_WATCH_PROMPTS" "$PIEN_WATCH_LEASES"
+  chmod 700 "$PIEN_WATCH_ROOT" "$PIEN_WATCH_RECORDS" "$PIEN_WATCH_TARGETS" "$PIEN_WATCH_LOGS" "$PIEN_WATCH_PROMPTS" "$PIEN_WATCH_LEASES"
+  export PIEN_WATCH_ROOT PIEN_WATCH_RECORDS PIEN_WATCH_TARGETS PIEN_WATCH_LOGS PIEN_WATCH_PROMPTS PIEN_WATCH_LEASES
+}
+
+record_path() {
+  printf '%s/%s.json\n' "$PIEN_WATCH_RECORDS" "$1"
+}
+
+target_path() {
+  printf '%s/%s.thread\n' "$PIEN_WATCH_TARGETS" "$1"
+}
+
+prompt_path() {
+  printf '%s/%s-%s.prompt\n' "$PIEN_WATCH_PROMPTS" "$1" "$2"
+}
+
+lease_path() {
+  printf '%s/%s-%s.lease\n' "$PIEN_WATCH_LEASES" "$1" "$2"
+}
+
+write_target() {
+  target_file=$(target_path "$1")
+  target_tmp=$target_file.tmp.$$
+  printf '%s\n' "$CODEX_THREAD_ID" >"$target_tmp"
+  chmod 600 "$target_tmp"
+  mv "$target_tmp" "$target_file"
+}
+
+process_start() {
+  ps -ww -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+process_identity_matches() {
+  candidate_pid=$1
+  expected_start=$2
+  case "$candidate_pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$candidate_pid" -gt 0 ] || return 1
+  kill -0 "$candidate_pid" 2>/dev/null || return 1
+  [ -n "$expected_start" ] && [ "$(process_start "$candidate_pid")" = "$expected_start" ]
+}
+
+watcher_is_live() {
+  candidate_pid=$1
+  generation=$2
+  expected_start=$3
+  agent_name=$4
+  [ -n "$generation" ] || return 1
+  if [ -n "$expected_start" ]; then
+    process_identity_matches "$candidate_pid" "$expected_start" || return 1
+    process_command=$(ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)
+    case "$process_command" in
+      *watch-agent*--run*"$generation"*) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  lease_file=$(lease_path "$agent_name" "$generation")
+  [ -f "$lease_file" ] \
+    && [ "$(sed -n '1p' "$lease_file")" = "$candidate_pid" ] \
+    && kill -0 "$candidate_pid" 2>/dev/null
+}
+
+release_lock() {
+  [ -n "${PIEN_WATCH_LOCK:-}" ] || return 0
+  rm -f "$PIEN_WATCH_LOCK/owner"
+  rmdir "$PIEN_WATCH_LOCK" 2>/dev/null || true
+  PIEN_WATCH_LOCK=
+}
+
+# shellcheck disable=SC2329 # Invoked by signal/exit traps.
+cleanup_worker() {
+  [ -z "${PIEN_WATCH_PROMPT_PAYLOAD:-}" ] || rm -f "$PIEN_WATCH_PROMPT_PAYLOAD"
+  [ -z "${PIEN_WATCH_LEASE_FILE:-}" ] || rm -f "$PIEN_WATCH_LEASE_FILE"
+}
+
+acquire_lock() {
+  agent_name=$1
+  PIEN_WATCH_LOCK=$PIEN_WATCH_RECORDS/.${agent_name}.lock
+  lock_attempt=0
+  while ! mkdir "$PIEN_WATCH_LOCK" 2>/dev/null; do
+    owner_pid=
+    owner_start=
+    if [ -f "$PIEN_WATCH_LOCK/owner" ]; then
+      owner_pid=$(sed -n '1p' "$PIEN_WATCH_LOCK/owner")
+      owner_start=$(sed -n '2p' "$PIEN_WATCH_LOCK/owner")
+    fi
+    lock_busy=false
+    if [ -z "$owner_pid" ] || [ -z "$owner_start" ]; then
+      lock_mtime=$(stat -f '%m' "$PIEN_WATCH_LOCK" 2>/dev/null || stat -c '%Y' "$PIEN_WATCH_LOCK" 2>/dev/null || printf '0')
+      lock_age=$(($(date +%s) - lock_mtime))
+      if [ "$lock_age" -lt 10 ]; then
+        lock_busy=true
+      fi
+    elif process_identity_matches "$owner_pid" "$owner_start"; then
+      lock_busy=true
+    fi
+    if [ "$lock_busy" = true ]; then
+      lock_attempt=$((lock_attempt + 1))
+      if [ "$lock_attempt" -ge 50 ]; then
+        printf '%s\n' "watcher operation remains in progress for $agent_name" >&2
+        exit 1
+      fi
+      sleep 0.1
+      continue
+    fi
+    rm -f "$PIEN_WATCH_LOCK/owner"
+    rmdir "$PIEN_WATCH_LOCK" 2>/dev/null || {
+      printf '%s\n' "cannot recover stale watcher lock for $agent_name" >&2
+      exit 1
+    }
+  done
+  printf '%s\n%s\n' "$$" "$(process_start "$$")" >"$PIEN_WATCH_LOCK/owner"
+  chmod 600 "$PIEN_WATCH_LOCK/owner"
+  trap 'release_lock; cleanup_worker' EXIT HUP INT TERM
+}
+
+update_record() {
+  agent_name=$1
+  jq_filter=$2
+  shift 2
+  record_file=$(record_path "$agent_name")
+  [ -f "$record_file" ] || return 1
+  record_tmp=$record_file.tmp.$$
+  jq "$@" "$jq_filter" "$record_file" >"$record_tmp"
+  chmod 600 "$record_tmp"
+  mv "$record_tmp" "$record_file"
+}
+
+generation_is_current() {
+  record_file=$(record_path "$1")
+  [ -f "$record_file" ] && [ "$(jq -r '.generation // ""' "$record_file")" = "$2" ]
+}
+
+update_current_record() {
+  agent_name=$1
+  generation=$2
+  shift 2
+  generation_is_current "$agent_name" "$generation" || return 2
+  update_record "$agent_name" "$@"
+}
+
+start_watch() {
+  mode=$1
+  agent_name=$2
+  timeout_ms=$3
+  prompt=${4:-}
+  validate_agent "$agent_name"
+  prepare_state
+  acquire_lock "$agent_name"
+
+  record_file=$(record_path "$agent_name")
+  if [ -f "$record_file" ]; then
+    existing_state=$(jq -r '.state // "unknown"' "$record_file")
+    existing_pid=$(jq -r '.pid // 0' "$record_file")
+    existing_generation=$(jq -r '.generation // ""' "$record_file")
+    existing_process_start=$(jq -r '.process_started_at // ""' "$record_file")
+    if [ "$existing_state" = "running" ] && watcher_is_live "$existing_pid" "$existing_generation" "$existing_process_start" "$agent_name"; then
+      printf '%s\n' "watch already running for $agent_name (pid $existing_pid)" >&2
+      exit 1
+    fi
+    rm -f "$(prompt_path "$agent_name" "$existing_generation")" "$(lease_path "$agent_name" "$existing_generation")"
+  fi
+
+  write_target "$agent_name"
+  started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  generation=$(date -u +%Y%m%dT%H%M%SZ)-$$
+  log_file=$PIEN_WATCH_LOGS/${agent_name}-$(date -u +%Y%m%dT%H%M%SZ)-$$.log
+  if [ "$mode" = "prompt" ]; then
+    prompt_checksum=$(printf '%s' "$prompt" | cksum | awk '{print $1 ":" $2}')
+    prompt_payload=$(prompt_path "$agent_name" "$generation")
+    printf '%s' "$prompt" >"$prompt_payload"
+    chmod 600 "$prompt_payload"
+  else
+    prompt_checksum=none
+    prompt_payload=-
+  fi
+
+  # shellcheck disable=SC2016 # $pid is a jq variable.
+  record_tmp=$record_file.tmp.$$
+  jq -n \
+    --arg agent "$agent_name" \
+    --arg mode "$mode" \
+    --arg state running \
+    --arg started_at "$started_at" \
+    --arg log "$log_file" \
+    --arg prompt_checksum "$prompt_checksum" \
+    --arg generation "$generation" \
+    --argjson pid "$$" \
+    '{version:1, agent:$agent, mode:$mode, state:$state, generation:$generation, pid:$pid, process_started_at:null, started_at:$started_at, finished_at:null, wait_exit:null, notified_thread:null, log:$log, prompt_checksum:$prompt_checksum}' \
+    >"$record_tmp"
+  chmod 600 "$record_tmp"
+  mv "$record_tmp" "$record_file"
+
+  nohup "$0" --run "$mode" "$agent_name" "$timeout_ms" "$generation" "$prompt_payload" \
+    >"$log_file" 2>&1 </dev/null &
+  watcher_pid=$!
+  lease_file=$(lease_path "$agent_name" "$generation")
+  printf '%s\n' "$watcher_pid" >"$lease_file"
+  chmod 600 "$lease_file"
+  watcher_process_start=$(process_start "$watcher_pid")
+  # shellcheck disable=SC2016 # $pid and $process_start are jq variables.
+  update_current_record "$agent_name" "$generation" '.pid = $pid | .process_started_at = $process_start' \
+    --argjson pid "$watcher_pid" --arg process_start "$watcher_process_start"
+  release_lock
+  jq --arg target "$CODEX_THREAD_ID" '. + {target_thread:$target}' "$record_file"
+}
+
+queue_recovery() {
+  agent_name=$1
+  generation=$2
+  record_file=$(record_path "$agent_name")
+  record_state=$(jq -r '.state // "unknown"' "$record_file")
+  message="Recovered watcher record for Herdr agent ${agent_name} (state ${record_state}). Read its live state, pane, and latest Bead checkpoint before advancing or redispatching."
+  if codex queue --thread "$CODEX_THREAD_ID" --message "$message"; then
+    # shellcheck disable=SC2016 # $thread is a jq variable.
+    update_current_record "$agent_name" "$generation" '.state = "notified" | .notified_thread = $thread' --arg thread "$CODEX_THREAD_ID"
+  else
+    update_current_record "$agent_name" "$generation" '.state = "queue_failed"' || true
+    herdr notification show "Pien recovery wakeup failed" --body "$message" || true
+    return 1
+  fi
+}
+
+adopt_agent() {
+  agent_name=$1
+  validate_agent "$agent_name"
+  prepare_state
+  acquire_lock "$agent_name"
+  record_file=$(record_path "$agent_name")
+  [ -f "$record_file" ] || {
+    printf '%s\n' "no watcher record for $agent_name" >&2
+    return 1
+  }
+
+  write_target "$agent_name"
+  record_state=$(jq -r '.state // "unknown"' "$record_file")
+  record_pid=$(jq -r '.pid // 0' "$record_file")
+  record_process_start=$(jq -r '.process_started_at // ""' "$record_file")
+  notified_thread=$(jq -r '.notified_thread // ""' "$record_file")
+  record_generation=$(jq -r '.generation // ""' "$record_file")
+
+  if [ "$record_state" = "running" ]; then
+    if watcher_is_live "$record_pid" "$record_generation" "$record_process_start" "$agent_name"; then
+      printf '%s\n' "adopted live watcher for $agent_name (pid $record_pid)"
+      release_lock
+    else
+      rm -f "$(prompt_path "$agent_name" "$record_generation")"
+      release_lock
+      start_watch wait "$agent_name" "${PIEN_AGENT_TIMEOUT_MS:-1800000}"
+    fi
+  elif [ "$notified_thread" != "$CODEX_THREAD_ID" ]; then
+    queue_recovery "$agent_name" "$record_generation"
+    release_lock
+  else
+    printf '%s\n' "watcher record for $agent_name already notified this thread"
+    release_lock
+  fi
+}
+
+if [ "${1:-}" = "--detach" ]; then
+  [ "$#" -eq 3 ] || usage
+  require_context
+  require_commands
+  start_watch prompt "$2" "${PIEN_AGENT_TIMEOUT_MS:-1800000}" "$3"
+  exit 0
+fi
+
+if [ "${1:-}" = "--rearm" ]; then
+  [ "$#" -eq 2 ] || usage
+  require_context
+  require_commands
+  start_watch wait "$2" "${PIEN_AGENT_TIMEOUT_MS:-1800000}"
+  exit 0
+fi
+
+if [ "${1:-}" = "--adopt" ]; then
+  [ "$#" -eq 2 ] || usage
+  require_context
+  require_commands
+  adopt_agent "$2"
+  exit 0
+fi
+
+if [ "${1:-}" = "--adopt-all" ]; then
+  [ "$#" -eq 1 ] || usage
+  require_context
+  require_commands
+  prepare_state
+  found=false
+  for record_file in "$PIEN_WATCH_RECORDS"/*.json; do
+    [ -e "$record_file" ] || continue
+    found=true
+    agent_name=${record_file##*/}
+    agent_name=${agent_name%.json}
+    adopt_agent "$agent_name" || true
+  done
+  [ "$found" = true ] || printf '%s\n' "no watcher records"
+  exit 0
+fi
+
+if [ "${1:-}" = "--list" ]; then
+  [ "$#" -eq 1 ] || usage
+  require_commands
+  prepare_state
+  for record_file in "$PIEN_WATCH_RECORDS"/*.json; do
+    [ -e "$record_file" ] || continue
+    agent_name=${record_file##*/}
+    agent_name=${agent_name%.json}
+    current_target=
+    target_file=$(target_path "$agent_name")
+    [ ! -f "$target_file" ] || current_target=$(sed -n '1p' "$target_file")
+    jq --arg target "$current_target" '. + {target_thread:$target}' "$record_file"
+  done | jq -s '.'
+  exit 0
+fi
+
+if [ "${1:-}" = "--clear" ]; then
+  [ "$#" -eq 2 ] || usage
+  require_commands
+  validate_agent "$2"
+  prepare_state
+  acquire_lock "$2"
+  record_file=$(record_path "$2")
+  if [ ! -f "$record_file" ]; then
+    release_lock
+    exit 0
+  fi
+  record_pid=$(jq -r '.pid // 0' "$record_file")
+  record_state=$(jq -r '.state // "unknown"' "$record_file")
+  record_generation=$(jq -r '.generation // ""' "$record_file")
+  record_process_start=$(jq -r '.process_started_at // ""' "$record_file")
+  if [ "$record_state" = "running" ] && watcher_is_live "$record_pid" "$record_generation" "$record_process_start" "$2"; then
+    printf '%s\n' "refusing to clear live watcher for $2 (pid $record_pid)" >&2
+    exit 1
+  fi
+  rm -f "$(prompt_path "$2" "$record_generation")"
+  rm -f "$(lease_path "$2" "$record_generation")"
+  rm -f "$record_file" "$(target_path "$2")"
+  release_lock
+  printf '%s\n' "cleared watcher record for $2; retained its log"
+  exit 0
+fi
+
+if [ "${1:-}" = "--run" ]; then
+  [ "$#" -eq 6 ] || usage
+  mode=$2
+  agent_name=$3
+  timeout_ms=$4
+  generation=$5
+  prompt_payload=$6
+  require_commands
+  validate_agent "$agent_name"
+  prepare_state
+  expected_prompt=$(prompt_path "$agent_name" "$generation")
+  if [ "$mode" = "prompt" ] && [ "$prompt_payload" != "$expected_prompt" ]; then
+    printf '%s\n' "invalid watcher prompt payload" >&2
+    exit 2
+  fi
+  PIEN_WATCH_PROMPT_PAYLOAD=
+  [ "$mode" != "prompt" ] || PIEN_WATCH_PROMPT_PAYLOAD=$expected_prompt
+  PIEN_WATCH_LEASE_FILE=$(lease_path "$agent_name" "$generation")
+  export PIEN_WATCH_PROMPT_PAYLOAD PIEN_WATCH_LEASE_FILE
+  trap 'release_lock; cleanup_worker' EXIT HUP INT TERM
+  generation_is_current "$agent_name" "$generation" || exit 0
+
+  lease_attempt=0
+  while [ ! -f "$PIEN_WATCH_LEASE_FILE" ]; do
+    lease_attempt=$((lease_attempt + 1))
+    [ "$lease_attempt" -lt 50 ] || exit 1
+    sleep 0.02
+  done
+
+  if [ "$mode" = "prompt" ]; then
+    [ -f "$prompt_payload" ] || {
+      update_current_record "$agent_name" "$generation" '.state = "prompt_missing"' || true
+      exit 1
+    }
+    prompt=$(sed -n '1,$p' "$prompt_payload")
+    rm -f "$prompt_payload"
+    PIEN_WATCH_PROMPT_PAYLOAD=
+  else
+    prompt=
+  fi
+
+  set +e
+  if [ "$mode" = "prompt" ]; then
+    herdr agent prompt "$agent_name" "$prompt" --wait --timeout "$timeout_ms"
+  elif [ "$mode" = "wait" ]; then
+    herdr agent wait "$agent_name" --timeout "$timeout_ms"
+  else
+    usage
+  fi
+  wait_result=$?
+  set -e
+
+  generation_is_current "$agent_name" "$generation" || exit 0
+
+  finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  acquire_lock "$agent_name"
+  # shellcheck disable=SC2016 # $finished and $result are jq variables.
+  if ! update_current_record "$agent_name" "$generation" '.state = "settled" | .finished_at = $finished | .wait_exit = $result' \
+    --arg finished "$finished_at" --argjson result "$wait_result"; then
+    release_lock
+    exit 0
+  fi
+  release_lock
+
+  acquire_lock "$agent_name"
+  generation_is_current "$agent_name" "$generation" || {
+    release_lock
+    exit 0
+  }
+  target_file=$(target_path "$agent_name")
+  target_thread=
+  [ ! -f "$target_file" ] || target_thread=$(sed -n '1p' "$target_file")
+  message="Herdr agent ${agent_name} wait ended (mode ${mode}, exit ${wait_result}). Read its live state, pane, and latest Bead checkpoint before advancing. If it is still working, rearm the watcher; never resend the task."
+  if [ -n "$target_thread" ] && codex queue --thread "$target_thread" --message "$message"; then
+    # shellcheck disable=SC2016 # $thread is a jq variable.
+    update_current_record "$agent_name" "$generation" '.state = "notified" | .notified_thread = $thread' --arg thread "$target_thread"
+  else
+    update_current_record "$agent_name" "$generation" '.state = "queue_failed"' || true
+    herdr notification show "Pien wakeup failed" --body "$message" || true
+    release_lock
+    exit 1
+  fi
+  release_lock
+  exit "$wait_result"
+fi
+
+usage
