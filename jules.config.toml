@@ -19,3 +19,4 @@ memories = false
 multi_agent = false
 multi_agent_v2 = false
 hooks = true
+prevent_idle_sleep = true

@@ -12,6 +12,8 @@ The fleet uses independent top-level Codex sessions as the runtime, Herdr as the
 
 Native Codex subagents are disabled for every durable fleet role. Pien alone may spawn Observer Roni as one bounded, read-only native subagent for questions that need neither a Bead nor resumable terminal state. Roni is not a pipeline member.
 
+Every fleet profile prevents host sleep while a turn is active so long-running planning, implementation, review, and reconciliation work is not interrupted.
+
 | Ephemeral helper | Runtime | Model | Reasoning | Responsibility |
 | --- | --- | --- | --- | --- |
 | Observer Roni | Pien native subagent | `gpt-5.6-terra` | medium | Bounded read-only investigation |
