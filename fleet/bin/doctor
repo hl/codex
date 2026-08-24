@@ -18,7 +18,7 @@ for command_name in codex herdr bd jq zsh; do
   fi
 done
 
-required_files='pien.config.toml odessa.config.toml jules.config.toml rasma.config.toml mira.config.toml agents/roni.toml fleet/CHECKPOINTS.md fleet/roles/pien.md fleet/roles/odessa.md fleet/roles/jules.md fleet/roles/rasma.md fleet/roles/mira.md fleet/bin/pien fleet/bin/watch-agent fleet/bin/install-host fleet/pien.zsh'
+required_files='pien.config.toml odessa.config.toml jules.config.toml rasma.config.toml mira.config.toml agents/roni.toml fleet/CHECKPOINTS.md fleet/roles/pien.md fleet/roles/odessa.md fleet/roles/jules.md fleet/roles/rasma.md fleet/roles/mira.md fleet/bin/pien fleet/bin/watch-agent fleet/bin/install-host fleet/herdr-plugin/herdr-plugin.toml fleet/pien.zsh'
 for relative_path in $required_files; do
   if [ -f "$codex_home/$relative_path" ]; then
     pass "$relative_path exists"
@@ -96,10 +96,10 @@ check_profile_runtime() {
   fi
 }
 
-check_profile_runtime pien gpt-5.6 high danger-full-access
-check_profile_runtime odessa gpt-5.6 high danger-full-access
-check_profile_runtime jules gpt-5.6 high danger-full-access
-check_profile_runtime rasma gpt-5.6 high workspace-write
+check_profile_runtime pien gpt-5.6-sol high danger-full-access
+check_profile_runtime odessa gpt-5.6-sol high danger-full-access
+check_profile_runtime jules gpt-5.6-sol high danger-full-access
+check_profile_runtime rasma gpt-5.6-sol high workspace-write
 check_profile_runtime mira gpt-5.6-luna low workspace-write
 
 roni_config=$codex_home/agents/roni.toml
@@ -174,7 +174,7 @@ else
 fi
 
 if "$codex_home/fleet/bin/install-host" --check >/dev/null 2>&1; then
-  pass "shell binding and Herdr restore policy are active"
+  pass "shell binding, Herdr restore policy, and fleet wakeup plugin are active"
 else
   fail "host activation is incomplete; run fleet/bin/install-host"
 fi

@@ -1,0 +1,13 @@
+id = "pien.fleet-wakeup"
+name = "Pien fleet wakeup"
+version = "0.1.0"
+min_herdr_version = "0.8.2"
+description = "Wake the matching Pien controller when a registered fleet agent settles."
+platforms = ["macos", "linux"]
+
+[[startup]]
+command = ["../bin/watch-agent", "--plugin-startup"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["../bin/watch-agent", "--plugin-event"]

@@ -4,10 +4,10 @@ The fleet uses independent top-level Codex sessions as the runtime, Herdr as the
 
 | Role | Profile | Model | Reasoning | Responsibility |
 | --- | --- | --- | --- | --- |
-| Commander Pien | `pien` | `gpt-5.6` | high | User interface and orchestration only |
-| Navigator Odessa | `odessa` | `gpt-5.6` | high | Planning and Beads decomposition |
-| Engineer Jules | `jules` | `gpt-5.6` | high | Isolated implementation and landing |
-| Auditor Rasma | `rasma` | `gpt-5.6` | high | Independent read-only review |
+| Commander Pien | `pien` | `gpt-5.6-sol` | high | User interface and orchestration only |
+| Navigator Odessa | `odessa` | `gpt-5.6-sol` | high | Planning and Beads decomposition |
+| Engineer Jules | `jules` | `gpt-5.6-sol` | high | Isolated implementation and landing |
+| Auditor Rasma | `rasma` | `gpt-5.6-sol` | high | Independent read-only review |
 | Quartermaster Mira | `mira` | `gpt-5.6-luna` | low | Mechanical Beads reconciliation |
 
 Native Codex subagents are disabled for every durable fleet role. Pien alone may spawn Observer Roni as one bounded, read-only native subagent for questions that need neither a Bead nor resumable terminal state. Roni is not a pipeline member.
@@ -68,17 +68,17 @@ Do not prepend another `codex` after `--`. Herdr selects the executable with `--
 
 ## Asynchronous wakeup
 
-`${CODEX_HOME:-$HOME/.codex}/fleet/bin/watch-agent` detaches a fused `herdr agent prompt --wait` and queues a message back to Pien's current thread when the wait ends. Records and logs persist under `${PIEN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pien}`.
+`${CODEX_HOME:-$HOME/.codex}/fleet/bin/watch-agent` registers one prompt against the worker's pane and native session, then submits it. The linked `pien.fleet-wakeup` Herdr plugin receives `pane.agent_status_changed` directly from Herdr and prompts the matching live Pien controller when that registered worker settles. No detached waiter process or watcher pane is created. Records persist under `${PIEN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pien}`; hook execution is visible through `herdr plugin log list --plugin pien.fleet-wakeup`.
 
 ```sh
-watch-agent --detach <agent> '<prompt>' # send once, then wait
-watch-agent --rearm <agent>             # wait again without resending
+watch-agent --detach <agent> '<prompt>' # register and send once
+watch-agent --rearm <agent>             # retarget/reconcile without resending
 watch-agent --adopt-all                 # retarget/recover after Pien restarts
 watch-agent --list                      # inspect durable records
-watch-agent --clear <agent>             # clear a settled record, retain log
+watch-agent --clear <agent>             # clear a settled registration
 ```
 
-Pien always checks the live pane and latest Bead checkpoint before advancing or redispatching.
+`fleet/bin/install-host` links the local plugin idempotently. Pien always checks the live pane and latest Bead checkpoint before advancing or redispatching.
 
 ## Crash recovery
 

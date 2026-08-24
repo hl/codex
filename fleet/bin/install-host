@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+plugin_dir=$(CDPATH='' cd -- "$script_dir/../herdr-plugin" && pwd)
+plugin_id=pien.fleet-wakeup
+
 if [ -n "${XDG_CONFIG_HOME:-}" ]; then
   herdr_config_default=$XDG_CONFIG_HOME/herdr/config.toml
 else
@@ -37,15 +41,25 @@ if [ -f "$herdr_config" ] && awk '
   herdr_ok=true
 fi
 
+plugin_ok=false
+if command -v herdr >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  plugin_json=$(herdr plugin list --plugin "$plugin_id" --json 2>/dev/null || true)
+  if printf '%s\n' "$plugin_json" | jq -e --arg id "$plugin_id" --arg root "$plugin_dir" \
+    '.result.plugins | any(.plugin_id == $id and .enabled == true and .plugin_root == $root)' >/dev/null 2>&1; then
+    plugin_ok=true
+  fi
+fi
+
 if [ "$check_only" = true ]; then
   [ "$zsh_ok" = true ] || printf '%s\n' "MISSING: $source_line in $zshrc_file" >&2
   [ "$herdr_ok" = true ] || printf '%s\n' "MISSING: [session] $session_key in $herdr_config" >&2
-  [ "$zsh_ok" = true ] && [ "$herdr_ok" = true ]
+  [ "$plugin_ok" = true ] || printf '%s\n' "MISSING: enabled Herdr plugin $plugin_id from $plugin_dir" >&2
+  [ "$zsh_ok" = true ] && [ "$herdr_ok" = true ] && [ "$plugin_ok" = true ]
   exit
 fi
 
-if [ "$zsh_ok" = true ] && [ "$herdr_ok" = true ]; then
-  printf '%s\n' "Pien shell binding and Herdr restore policy installed."
+if [ "$zsh_ok" = true ] && [ "$herdr_ok" = true ] && [ "$plugin_ok" = true ]; then
+  printf '%s\n' "Pien shell binding, Herdr restore policy, and fleet wakeup plugin installed."
   exit 0
 fi
 
@@ -53,6 +67,10 @@ timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 
 command -v herdr >/dev/null 2>&1 || {
   printf '%s\n' "install-host requires herdr" >&2
+  exit 1
+}
+command -v jq >/dev/null 2>&1 || {
+  printf '%s\n' "install-host requires jq" >&2
   exit 1
 }
 
@@ -184,5 +202,9 @@ if [ "$herdr_ok" != true ]; then
   fi
 fi
 
+if [ "$plugin_ok" != true ]; then
+  herdr plugin link "$plugin_dir" --enabled >/dev/null
+fi
+
 "$0" --check
-printf '%s\n' "Pien shell binding and Herdr restore policy installed."
+printf '%s\n' "Pien shell binding, Herdr restore policy, and fleet wakeup plugin installed."

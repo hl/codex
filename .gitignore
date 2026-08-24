@@ -12,3 +12,9 @@ prompts/.DS_Store
 !skills/**
 skills/.system/
 skills/**/.DS_Store
+
+!fleet/
+fleet/*
+!fleet/herdr-plugin/
+fleet/herdr-plugin/*
+!fleet/herdr-plugin/herdr-plugin.toml
