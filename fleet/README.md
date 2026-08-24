@@ -68,7 +68,7 @@ Do not prepend another `codex` after `--`. Herdr selects the executable with `--
 
 ## Asynchronous wakeup
 
-`${CODEX_HOME:-$HOME/.codex}/fleet/bin/watch-agent` registers one prompt against the worker's pane and native session, then submits it. The linked `pien.fleet-wakeup` Herdr plugin receives `pane.agent_status_changed` directly from Herdr and prompts the matching live Pien controller when that registered worker settles. No detached waiter process or watcher pane is created. Records persist under `${PIEN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pien}`; hook execution is visible through `herdr plugin log list --plugin pien.fleet-wakeup`.
+`${CODEX_HOME:-$HOME/.codex}/fleet/bin/watch-agent` registers one prompt against the worker's pane and native session, then submits it. The linked `pien.fleet-wakeup` Herdr plugin receives `pane.agent_status_changed` directly from Herdr and queues a message to the matching Pien Codex thread when that registered worker settles. Wakeups never use `herdr agent prompt` against Pien's human-facing pane: that command writes into the live composer and sends Enter, which can submit a user's unfinished draft. If queueing fails, the plugin shows a Herdr notification instead. No detached waiter process or watcher pane is created. Records persist under `${PIEN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/pien}`; hook execution is visible through `herdr plugin log list --plugin pien.fleet-wakeup`.
 
 ```sh
 watch-agent --detach <agent> '<prompt>' # register and send once

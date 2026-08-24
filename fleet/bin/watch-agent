@@ -177,13 +177,6 @@ wake_controller() {
   target_thread=$1
   message=$2
   PIEN_WAKE_METHOD=
-  controller_info=$(agent_snapshot pien)
-  controller_thread=$(printf '%s\n' "$controller_info" | jq -r '.result.agent.agent_session.value // ""' 2>/dev/null || true)
-  if [ -n "$target_thread" ] && [ "$controller_thread" = "$target_thread" ] \
-    && herdr agent prompt pien "$message" >/dev/null 2>&1; then
-    PIEN_WAKE_METHOD=herdr_prompt
-    return 0
-  fi
   if [ -n "$target_thread" ] && codex queue --thread "$target_thread" --message "$message" >/dev/null 2>&1; then
     PIEN_WAKE_METHOD=codex_queue
     return 0
@@ -248,14 +241,9 @@ reconcile_record() {
   acquire_lock "$agent_name"
   if generation_is_current "$record_file" "$generation"; then
     if [ "$wake_ok" = true ]; then
-      if [ "$wake_method" = herdr_prompt ]; then
-        next_state=notified
-      else
-        next_state=queued
-      fi
       # shellcheck disable=SC2016 # jq variables are passed with --arg.
       update_record "$record_file" '.state = $state | .notified_thread = $thread | .wake_method = $method' \
-        --arg state "$next_state" --arg thread "$target_thread" --arg method "$wake_method"
+        --arg state queued --arg thread "$target_thread" --arg method "$wake_method"
     else
       update_record "$record_file" '.state = "wake_failed" | .wake_method = "failed"'
     fi
