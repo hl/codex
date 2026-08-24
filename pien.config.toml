@@ -1,5 +1,5 @@
 # Commander Pien: the sole user-facing orchestrator for the Herdr fleet.
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"

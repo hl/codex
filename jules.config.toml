@@ -1,5 +1,5 @@
 # Engineer Jules: implementation, verification, PR, and gated landing.
-model = "gpt-5.6"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "high"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
